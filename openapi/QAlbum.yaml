@@ -1,0 +1,937 @@
+openapi: 3.0.3
+info:
+  title: QAlbum API
+  description: 家庭私有云相册后端 API（家庭空间版）
+  version: 1.0.0
+  contact:
+    name: QAlbum Team
+
+servers:
+  - url: https://album.example.com/api
+    description: Production server via Cloudflare Tunnel
+
+paths:
+  # ─────────────────────────────── 认证 ───────────────────────────────
+  /auth/login:
+    post:
+      summary: 微信小程序登录
+      description: 用 wx.login 获取的 code 换取服务端 Token
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  description: 微信登录凭证
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  expires_in:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ─────────────────────────────── 家庭空间 ───────────────────────────────
+  /spaces:
+    get:
+      summary: 获取家庭空间列表
+      description: 当前用户加入的所有家庭空间
+      tags: [Space]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  page_size:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Space'
+
+    post:
+      summary: 创建家庭空间
+      description: 创建者自动成为管理员
+      tags: [Space]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, quota_bytes]
+              properties:
+                name:
+                  type: string
+                  maxLength: 50
+                quota_bytes:
+                  type: integer
+                  description: 容量上限（字节）
+                backup_path:
+                  type: string
+                  description: 可选，备份目标路径
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Space'
+
+  /spaces/{space_id}:
+    get:
+      summary: 获取家庭空间详情
+      tags: [Space]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Space'
+
+    put:
+      summary: 修改家庭空间（重命名、改配额、改备份路径）
+      description: 仅管理员可操作
+      tags: [Space]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                quota_bytes:
+                  type: integer
+                backup_path:
+                  type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Space'
+
+    delete:
+      summary: 删除家庭空间
+      description: 仅管理员可删除，物理文件全部删除
+      tags: [Space]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '204':
+          description: 删除成功
+
+  /spaces/{space_id}/invite:
+    post:
+      summary: 生成邀请码
+      description: 管理员生成邀请码，供家庭成员加入空间
+      tags: [Space]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expire_hours:
+                  type: integer
+                  default: 24
+                  description: 邀请码有效期（小时）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  invite_code:
+                    type: string
+                    description: 小程序卡片分享用的邀请码
+                  expires_at:
+                    type: string
+                    format: date-time
+
+  /spaces/join:
+    post:
+      summary: 通过邀请码加入家庭空间
+      tags: [Space]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invite_code]
+              properties:
+                invite_code:
+                  type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Space'
+
+  /spaces/{space_id}/members:
+    get:
+      summary: 获取家庭空间成员列表
+      tags: [Space]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SpaceMember'
+
+  /spaces/{space_id}/members/{user_id}:
+    delete:
+      summary: 移除成员
+      description: 仅管理员可操作，不能移除自己
+      tags: [Space]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '204':
+          description: 移除成功
+
+  /spaces/{space_id}/backup/sync:
+    post:
+      summary: 手动触发备份同步（补备）
+      description: 管理员触发，将空间内待同步文件复制到外接存储
+      tags: [Space]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 同步已触发（异步执行）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pending_count:
+                    type: integer
+                    description: 待同步文件数量
+
+  # ─────────────────────────────── 相册 ───────────────────────────────
+  /spaces/{space_id}/albums:
+    get:
+      summary: 获取相册列表
+      tags: [Album]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  page_size:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Album'
+
+    post:
+      summary: 创建相册
+      description: 空间内任意成员均可创建
+      tags: [Album]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 50
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Album'
+
+  /spaces/{space_id}/albums/{album_id}:
+    get:
+      summary: 获取相册详情
+      tags: [Album]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: album_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Album'
+
+    put:
+      summary: 修改相册（重命名）
+      description: 空间内任意成员均可操作
+      tags: [Album]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: album_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Album'
+
+    delete:
+      summary: 删除相册
+      description: 空间内任意成员均可删除，物理文件不受影响
+      tags: [Album]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: album_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '204':
+          description: 删除成功
+
+  # ─────────────────────────────── 文件 ───────────────────────────────
+  /spaces/{space_id}/albums/{album_id}/files:
+    get:
+      summary: 获取相册文件列表
+      tags: [File]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: album_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, default: 20 }
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [image, video, all]
+            default: all
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  page_size:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/File'
+
+    post:
+      summary: 上传文件
+      description: multipart/form-data，支持图片和视频，最大 200MB
+      tags: [File]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: album_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                filename:
+                  type: string
+                  description: 可选，自定义文件名
+      responses:
+        '201':
+          description: 上传成功（异步生成缩略图）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/File'
+        '413':
+          description: 文件过大或超出空间配额
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /spaces/{space_id}/files/{file_id}:
+    get:
+      summary: 获取文件详情
+      tags: [File]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: file_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/File'
+
+    put:
+      summary: 修改文件（重命名 / 移动到其它相册）
+      description: 空间内任意成员均可操作
+      tags: [File]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: file_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                filename:
+                  type: string
+                  description: 新文件名
+                album_id:
+                  type: integer
+                  description: 目标相册 ID（移动操作，必须在同一空间内）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/File'
+
+    delete:
+      summary: 删除文件（进入回收站）
+      description: 空间内任意成员均可删除
+      tags: [File]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: file_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '204':
+          description: 删除成功
+
+  /spaces/{space_id}/files/{file_id}/download:
+    get:
+      summary: 下载原文件
+      tags: [File]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: file_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 文件流
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+
+  /spaces/{space_id}/files/{file_id}/thumbnail:
+    get:
+      summary: 获取缩略图 / 视频封面
+      tags: [File]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: file_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 图片流
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '202':
+          description: 缩略图生成中
+
+  # ─────────────────────────────── 重复检测 ───────────────────────────────
+  /spaces/{space_id}/duplicates:
+    get:
+      summary: 检测重复图片
+      description: 在空间维度跨相册同步检测，返回相似图片组
+      tags: [Duplicate]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: threshold
+          in: query
+          schema: { type: integer, default: 10 }
+          description: 汉明距离阈值
+      responses:
+        '200':
+          description: 检测完成
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  groups:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        files:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/File'
+                        similarity:
+                          type: integer
+                          description: 组内最大汉明距离
+
+  # ─────────────────────────────── 回收站 ───────────────────────────────
+  /spaces/{space_id}/recycle:
+    get:
+      summary: 获取回收站文件列表
+      description: 仅管理员可见
+      tags: [Recycle]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/File'
+
+  /spaces/{space_id}/recycle/{file_id}/restore:
+    post:
+      summary: 恢复文件
+      description: 将文件从回收站恢复，仅管理员可操作
+      tags: [Recycle]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: file_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 恢复成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/File'
+
+  /spaces/{space_id}/recycle/clear:
+    post:
+      summary: 清空回收站
+      description: 物理删除回收站内所有文件，仅管理员可操作
+      tags: [Recycle]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: space_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '204':
+          description: 清空成功
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      description: 极简用户身份，仅用于后端识别，不展示给前端
+      properties:
+        id:
+          type: integer
+        openid:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Space:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        owner_id:
+          type: integer
+          description: 创建者/管理员 ID
+        quota_bytes:
+          type: integer
+        backup_path:
+          type: string
+          nullable: true
+        backup_status:
+          type: string
+          enum: [ok, pending, unavailable]
+        pending_backup_count:
+          type: integer
+          description: 待同步文件数量
+        member_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SpaceMember:
+      type: object
+      description: 成员列表仅返回用户 ID 和角色，不暴露昵称/头像
+      properties:
+        user_id:
+          type: integer
+        role:
+          type: string
+          enum: [admin, member]
+        joined_at:
+          type: string
+          format: date-time
+
+    Album:
+      type: object
+      properties:
+        id:
+          type: integer
+        space_id:
+          type: integer
+        name:
+          type: string
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 软删除标记，null 表示正常
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    File:
+      type: object
+      properties:
+        id:
+          type: integer
+        space_id:
+          type: integer
+        album_id:
+          type: integer
+        filename:
+          type: string
+        file_type:
+          type: string
+          enum: [image, video]
+        file_size:
+          type: integer
+        mime_type:
+          type: string
+        storage_path:
+          type: string
+          description: 相对 /data/photos/<space_id>/ 的路径
+        thumbnail_path:
+          type: string
+          nullable: true
+        cover_path:
+          type: string
+          nullable: true
+          description: 视频封面路径
+        phash:
+          type: string
+          nullable: true
+          description: 64bit pHash 的 hex 字符串
+        width:
+          type: integer
+          nullable: true
+        height:
+          type: integer
+          nullable: true
+        duration:
+          type: integer
+          nullable: true
+          description: 视频时长（秒）
+        uploaded_by:
+          type: integer
+        uploaded_at:
+          type: string
+          format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: string
+
+  responses:
+    BadRequest:
+      description: 请求参数错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: 未认证或 Token 过期
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

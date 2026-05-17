@@ -1,0 +1,14 @@
+[Unit]
+Description=QAlbum Server
+After=network.target
+
+[Service]
+Type=simple
+User=qalbum
+WorkingDirectory=/opt/qalbum
+ExecStart=/opt/qalbum/qalbum-server
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
